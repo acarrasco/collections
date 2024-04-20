@@ -2,22 +2,23 @@ package org.acarrasco.collections;
 
 import java.util.function.Function;
 
-public class CacheBenchmark {
+public class CacheBenchmarkSequentialPattern {
     public static void main(String[] args) {
         System.out.println("type\tthreads\tcapacity\tgets\tfactoryDelay\tloops\ttime");
-        for (int threads = 2; threads < 32; threads *= 2) {
-            for (int capacity = 1; capacity < 64; capacity *= 2) {
-                for (int gets = 1; gets < 16; gets *= 2) {
+        for (int threadsPow = 1; threadsPow <= 4; threadsPow++) {
+            for (int capacity = 2048; capacity <= 4096; capacity *= 8) {
+                for (int getsPow = 0; getsPow <= 4; getsPow++) {
                     for (int delay = 1; delay < 100; delay *= 4) {
-                        final int loops = Math.max(2, 1000 / (capacity * threads * delay));
+                        final int threads = 1 << threadsPow;
+                        final int gets = 1 << getsPow;
+                        final int loops = Math.max(1, 1000 / (capacity * threadsPow * delay * (1 + getsPow)));
                         long time;
-
                         time = testLockFree(capacity, threads, loops, gets, delay);
                         System.out.println(
                                 "lockFree\t" + threads + "\t" + capacity + "\t" + gets + "\t" + delay + "\t" + loops + "\t" + time);
-                        // time = testSynchronized(capacity, threads, loops, gets, delay);
-                        // System.out.println(
-                        //         "synchronized\t" + threads + "\t" + capacity + "\t" + gets + "\t" + delay + "\t" + loops + "\t" + time);
+                        time = testSynchronized(capacity, threads, loops, gets, delay);
+                        System.out.println(
+                                "synchronized\t" + threads + "\t" + capacity + "\t" + gets + "\t" + delay + "\t" + loops + "\t" + time);
                     }
                 }
             }
@@ -39,7 +40,7 @@ public class CacheBenchmark {
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-            return x;
+            return x * x;
         }
     }
 

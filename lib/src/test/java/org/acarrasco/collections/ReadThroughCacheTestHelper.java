@@ -13,11 +13,11 @@ public class ReadThroughCacheTestHelper {
             int loops) {
         for (int i = 0; i < loops * capacity; i++) {
             int v = cache.get(i);
-            assertEquals(i, v);
+            assertEquals(i * i, v);
         }
         final HashSet<Integer> expected = new HashSet<>();
         for (int i = (loops - 1) * capacity; i < loops * capacity; i++) {
-            expected.add(i);
+            expected.add(i * i);
         }
         final HashSet<Integer> result = new HashSet<>();
         for (Entry<Integer, Integer> entry : cache.entries()) {
@@ -34,7 +34,7 @@ public class ReadThroughCacheTestHelper {
             int loops) {
         for (int i = 0; i < loops * capacity; i++) {
             assertEquals(Integer.valueOf(0), cache.get(0));
-            assertEquals(Integer.valueOf(i), cache.get(i));
+            assertEquals(Integer.valueOf(i * i), cache.get(i));
         }
         final HashSet<Integer> expected = new HashSet<>();
         expected.add(0);
@@ -50,17 +50,18 @@ public class ReadThroughCacheTestHelper {
     }
 
     /**
-     * missingValueFactory should be the identity function.
+     * missingValueFactory should be square.
      */
     public static void testSingleThreadAlwaysLastElement(ReadThroughCache<Integer, Integer> cache, int capacity,
             int loops) {
         for (int i = 0; i < loops * capacity; i++) {
-            assertEquals(Integer.valueOf(i), cache.get(i));
-            assertEquals(Integer.valueOf(loops * capacity - 1), cache.get(loops * capacity - 1));
+            assertEquals(Integer.valueOf(i * i), cache.get(i));
+            final int last = loops * capacity - 1;
+            assertEquals(Integer.valueOf(last * last), cache.get(last));
         }
         final HashSet<Integer> expected = new HashSet<>();
         for (int i = (loops - 1) * capacity; i < loops * capacity; i++) {
-            expected.add(i);
+            expected.add(i * i);
         }
         final HashSet<Integer> result = new HashSet<>();
         for (Entry<Integer, Integer> entry : cache.entries()) {
@@ -86,7 +87,7 @@ public class ReadThroughCacheTestHelper {
                 final int end = offset + capacity * loops;
                 for (int i = offset; i < end; i++) {
                     for (int j = 0; j < gets; j++) {
-                        assertEquals(Integer.valueOf(i), cache.get(i));
+                        assertEquals(Integer.valueOf(i * i), cache.get(i));
                     }
                 }
             }
@@ -110,7 +111,8 @@ public class ReadThroughCacheTestHelper {
         final HashSet<Integer> possibleValues = new HashSet<>();
         for (int i = 0; i < capacity; i++) {
             for (int j = 0; j < nThreads; j++) {
-                possibleValues.add((j + 1) * capacity * loops - i - 1);
+                final int v = (j + 1) * capacity * loops - i - 1;
+                possibleValues.add(v * v);
             }
         }
         final HashSet<Integer> result = new HashSet<>();
@@ -122,5 +124,40 @@ public class ReadThroughCacheTestHelper {
         difference.removeAll(possibleValues);
 
         assertEquals(new HashSet<>(), difference);
+    }
+
+    public static void testMultiThreadedRandomKeys(ReadThroughCache<Integer, Integer> cache, int keySpace,
+            int nThreads, int getsPerThread) {
+        Thread[] threads = new Thread[nThreads];
+
+        class ElementGetter implements Runnable {
+            int seed = 1;
+            final static long M = 1103515245;
+            final static long C = 12345;
+
+            @Override
+            public void run() {
+                for (int i = 0; i < getsPerThread; i++) {
+                    seed = (int)((seed * M + C) & ((1L << 31) - 1));
+                    int key = seed % keySpace;
+                    assertEquals(Integer.valueOf(key * key), cache.get(key));
+                }
+            }
+        }
+
+        for (int i = 0; i < nThreads; i++) {
+            threads[i] = new Thread(new ElementGetter());
+        }
+        for (int i = 0; i < nThreads; i++) {
+            threads[i].start();
+        }
+
+        for (int i = 0; i < nThreads; i++) {
+            try {
+                threads[i].join();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }

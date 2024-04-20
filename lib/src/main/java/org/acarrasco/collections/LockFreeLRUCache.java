@@ -1,8 +1,10 @@
 package org.acarrasco.collections;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
-import java.util.Arrays;
+
+import java.util.ArrayList;
 
 /**
  * The code isn't going to win any beauty contests, it is just a proof of
@@ -18,6 +20,18 @@ import java.util.Arrays;
  */
 public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
 
+    class TickEntry {
+        final long tick;
+        final K key;
+        final V value;
+
+        public TickEntry(long tick, K key, V value) {
+            this.tick = tick;
+            this.key = key;
+            this.value = value;
+        }
+    }
+
     /**
      * The function that will compute or fetch a value that is not in the cache.
      */
@@ -26,23 +40,15 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
     /**
      * Pairs of Key/Value that are present in the cache.
      */
-    private final Entry<K, V>[] entries;
+    private final AtomicReferenceArray<TickEntry> entries;
 
     /**
-     * The last access timestamp for each entry.
-     */
-    private final AtomicLong[] timestamps;
-
-    /**
-     * Each access will increase the internal tick, that will be used as a timestamp;
+     * Each access will increase the internal tick, that will be used as a
+     * timestamp;
      */
     private final AtomicLong tick = new AtomicLong(0);
 
-    /**
-     * How many elements are in the cache. No entries will be evicted until
-     * the size reaches the capacity of the cache.
-     */
-    private int size = 0;
+    private final int capacity;
 
     /**
      * A special timestamp value to flag entries that are being updated.
@@ -56,20 +62,14 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
      * @param missingValueFactory The function that will compute missing values.
      * @param timestampFactory    The function that will compute timestamps.
      */
-    @SuppressWarnings("unchecked")
     public LockFreeLRUCache(
             int capacity,
             Function<K, V> missingValueFactory) {
 
+        this.capacity = capacity;
         this.missingValueFactory = missingValueFactory;
 
-        this.entries = new Entry[capacity];
-        this.timestamps = new AtomicLong[capacity];
-
-        for (int i = 0; i < capacity; i++) {
-            this.entries[i] = new Entry<>();
-            this.timestamps[i] = new AtomicLong();
-        }
+        this.entries = new AtomicReferenceArray<>(capacity);
     }
 
     /**
@@ -80,56 +80,40 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
      * evicting other key.
      */
     public V get(K key) {
-        Entry<K, V> found = new Entry<>();
-
-        for (int i = 0; i < this.size; i++) {
-            if (findAndUpdateTimestamp(i, key, found)) {
-                return found.value;
+        for (int i = 0; i < this.capacity; i++) {
+            TickEntry entry = findAndUpdateTimestamp(i, key);
+            if (entry != null) {
+                return entry.value;
             }
         }
 
         try {
             return addElement(key);
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
     }
 
-    /**
-     * Checks if key entry matches the requested key, and if so updates the
-     * access timestamp atomically.
-     * 
-     * If the key was evicted after comparing it, the CAS update of the timestamp
-     * will fail and it will be re-checked.
-     * 
-     * @param idx    The index of the entry to check.
-     * @param key    The key to check
-     * @param result Will contain the value of the entry.
-     * @return `true` if the key matched the entry `idx`, `false` if it didn't
-     *         match.
-     */
-    private boolean findAndUpdateTimestamp(int idx, K key, Entry<K, V> result) {
+    private TickEntry findAndUpdateTimestamp(int idx, K key) {
         boolean success = false;
+        TickEntry oldEntry;
         long newTimestamp;
-        long previousTimestamp;
         do {
-            previousTimestamp = this.timestamps[idx].get();
-            if (previousTimestamp == UPDATING) {
-                return false;
+            oldEntry = this.entries.get(idx);
+            if (oldEntry == null) {
+                return null;
             }
-            
-            // copy the values so they can't change after the atomic update of timestamp
-            result.key = this.entries[idx].key;
-            result.value = this.entries[idx].value;
-
-            if (!key.equals(result.key)) {
-                return false;
-            } else {
-                newTimestamp = this.tick.getAndIncrement();
-                success = timestamps[idx].compareAndSet(previousTimestamp, newTimestamp);
+            if (oldEntry.tick == UPDATING) {
+                return null;
             }
+            if (!key.equals(oldEntry.key)) {
+                return null;
+            }
+            newTimestamp = this.tick.getAndIncrement();
+            TickEntry newEntry = new TickEntry(newTimestamp, oldEntry.key, oldEntry.value);
+            success = this.entries.compareAndSet(idx, oldEntry, newEntry);
         } while (!success);
-        return true;
+        return oldEntry;
     }
 
     private V addElement(K key) throws InterruptedException {
@@ -140,40 +124,40 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
             // have been added before we entered the synchronized region
             // do it while we look for the least recent element
             int leastRecentIdx = 0;
-            long leastRecentTimestamp = Long.MAX_VALUE;
+            long leastRecentTick = Long.MAX_VALUE;
             int i;
-            for (i = 0; i < this.size; i++) {
-
-                boolean alreadyInCache = this.entries[i].key.equals(key);
-                final long candidateTimestamp = this.timestamps[i].get();
-
-                if (alreadyInCache) {
-                    if (candidateTimestamp == UPDATING) {
-                        this.wait();
-                        // we need to start over from the beginning...
-                        // the position of our key might have changed while we were waiting!
-                        return this.addElement(key);
-                    } else {
-                        return this.entries[i].value;
-                    }
+            for (i = 0; i < this.capacity; i++) {
+                final TickEntry entry = this.entries.get(i);
+                if (entry == null) {
+                    break;
                 }
+                boolean alreadyInCache = key.equals(entry.key);
 
-                if (candidateTimestamp < leastRecentTimestamp) {
+                if (alreadyInCache && entry.tick == UPDATING) {
+                    this.wait();
+                    // we need to start over from the beginning...
+                    // the position of our key might have changed while we were waiting!
+                    i = 0;
+                    leastRecentIdx = 0;
+                    leastRecentTick = Long.MAX_VALUE;
+                } else if (alreadyInCache && entry.tick != UPDATING) {
+                    final TickEntry newEntry = new TickEntry(this.tick.getAndIncrement(), entry.key, entry.value);
+                    this.entries.set(i, newEntry);
+                    return newEntry.value;
+                } else if (entry.tick < leastRecentTick) {
                     leastRecentIdx = i;
-                    leastRecentTimestamp = candidateTimestamp;
+                    leastRecentTick = entry.tick;
                 }
             }
 
-            if (this.size < this.entries.length) {
-                placementIdx = this.size;
-                this.size++;
+            if (this.entries.length() < this.capacity) {
+                placementIdx = this.entries.length();
             } else {
                 placementIdx = leastRecentIdx;
             }
             // the `get` method won't check a key that is updating
             // so a concurrent access will call addElement and
-            this.timestamps[placementIdx].set(UPDATING);
-            this.entries[placementIdx].key = key;
+            this.entries.set(placementIdx, new TickEntry(UPDATING, key, null));
         }
 
         // this is a potentially slow operation, we can do it outside of the
@@ -181,19 +165,23 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
         final V value = this.missingValueFactory.apply(key);
 
         synchronized (this) {
-            this.entries[placementIdx].value = value;
-            final long currentTimestamp = this.tick.getAndIncrement();
-
-            this.timestamps[placementIdx].set(currentTimestamp);
+            this.entries.set(placementIdx, new TickEntry(this.tick.getAndIncrement(), key, value));
             // notify other threads waiting for a value to be written
             this.notifyAll();
         }
-
         return value;
     }
 
     @Override
     public Iterable<Entry<K, V>> entries() {
-        return Arrays.asList(this.entries).subList(0, this.size);
+        final ArrayList<Entry<K, V>> result = new ArrayList<>(this.entries.length());
+        for (int i = 0; i < this.capacity; i++) {
+            TickEntry t = this.entries.get(i);
+            if (t == null) {
+                break;
+            }
+            result.add(new Entry<>(t.key, t.value));
+        }
+        return result;
     }
 }
