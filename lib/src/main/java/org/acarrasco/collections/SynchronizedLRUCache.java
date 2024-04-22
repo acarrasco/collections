@@ -2,7 +2,11 @@ package org.acarrasco.collections;
 
 import java.util.function.Function;
 import java.util.HashMap;
+import java.util.Iterator;
 
+/**
+ * An implementation of a LRU cache that is efficient for large capacity.
+ */
 public class SynchronizedLRUCache<K, V> implements ReadThroughCache<K, V> {
 
     /**
@@ -10,10 +14,20 @@ public class SynchronizedLRUCache<K, V> implements ReadThroughCache<K, V> {
      */
     private final Function<K, V> missingValueFactory;
 
+    /**
+     * The maximum number of elements this cache can hold.
+     */
     private final int capacity;
 
+    /**
+     * The data structure that keeps the order of last access.
+     */
     private FixedLinkedList<Entry<K, V>> recencyList;
 
+    /**
+     * Associates the keys to their entries in the recencyList, so the
+     * cost of moving an entry to the head is O(1).
+     */
     private HashMap<K, FixedLinkedList<Entry<K, V>>.Node> keyIndex;
 
     public SynchronizedLRUCache(
@@ -28,7 +42,7 @@ public class SynchronizedLRUCache<K, V> implements ReadThroughCache<K, V> {
     }
 
     @Override
-    public synchronized V get(K key) {
+    public synchronized V apply(K key) {
         Entry<K, V> entry;
         FixedLinkedList<Entry<K, V>>.Node node = keyIndex.get(key);
 
@@ -54,8 +68,8 @@ public class SynchronizedLRUCache<K, V> implements ReadThroughCache<K, V> {
     }
 
     @Override
-    public Iterable<Entry<K, V>> entries() {
-        return this.recencyList;
+    public Iterator<Entry<K, V>> iterator() {
+        return this.recencyList.iterator();
     }
 
 }

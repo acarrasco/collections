@@ -1,24 +1,36 @@
 package org.acarrasco.collections;
 
 import java.util.function.Function;
+import java.util.Map;
 
 public class CacheBenchmarkSequentialPattern {
     public static void main(String[] args) {
-        System.out.println("type\tthreads\tcapacity\tgets\tfactoryDelay\tloops\ttime");
+        final Map<String, ReadThroughCacheFactory> constructors = Map.of(
+                "lockfree", LockFreeLRUCache::new,
+                "synchronized", SynchronizedLRUCache::new);
+
+        System.out.println("type\tthreads\tcapacity\tfactoryDelay\tkeySpace\trepeatedGets\ttime");
         for (int threadsPow = 1; threadsPow <= 4; threadsPow++) {
-            for (int capacity = 2048; capacity <= 4096; capacity *= 8) {
-                for (int getsPow = 0; getsPow <= 4; getsPow++) {
-                    for (int delay = 1; delay < 100; delay *= 4) {
+            for (int capacityPow = 6; capacityPow <= 14; capacityPow += 3) {
+                for (int delay = 1; delay <= 25; delay *= 5) {
+                    for (int getsPow = 0; getsPow <= 4; getsPow++) {
+                        final int capacity = 1 << capacityPow;
                         final int threads = 1 << threadsPow;
-                        final int gets = 1 << getsPow;
-                        final int loops = Math.max(1, 1000 / (capacity * threadsPow * delay * (1 + getsPow)));
-                        long time;
-                        time = testLockFree(capacity, threads, loops, gets, delay);
-                        System.out.println(
-                                "lockFree\t" + threads + "\t" + capacity + "\t" + gets + "\t" + delay + "\t" + loops + "\t" + time);
-                        time = testSynchronized(capacity, threads, loops, gets, delay);
-                        System.out.println(
-                                "synchronized\t" + threads + "\t" + capacity + "\t" + gets + "\t" + delay + "\t" + loops + "\t" + time);
+                        final int repeatedGets = 1 << getsPow;
+                        final int keySpaceMult = Math.max(1,
+                                1000 / (capacity * threadsPow * delay * delay * (1 + getsPow)));
+
+                        Function<Integer, Integer> missingValueFactory = new MissingValueFactory(delay);
+                        for (Map.Entry<String, ReadThroughCacheFactory> constructor : constructors.entrySet()) {
+                            final ReadThroughCache<Integer, Integer> cache = constructor.getValue().build(capacity,
+                                    missingValueFactory);
+                            final long time = timeIt(
+                                    () -> AbstractReadThroughCacheTest.testMultiThreadedNGetsPerItem(cache, capacity,
+                                            keySpaceMult, threads, repeatedGets));
+                            System.out.println(
+                                    constructor.getKey() + "\t" + threads + "\t" + capacity + "\t" + delay + "\t"
+                                            + "\t" + capacity * keySpaceMult + "\t" + repeatedGets + "\t" + time);
+                        }
                     }
                 }
             }
@@ -26,7 +38,6 @@ public class CacheBenchmarkSequentialPattern {
     }
 
     static class MissingValueFactory implements Function<Integer, Integer> {
-
         final long delay;
 
         public MissingValueFactory(long delay) {
@@ -42,20 +53,6 @@ public class CacheBenchmarkSequentialPattern {
             }
             return x * x;
         }
-    }
-
-    static long testLockFree(int capacity, int threads, int loops, int gets, long factoryDelay) {
-        LockFreeLRUCache<Integer, Integer> cache = new LockFreeLRUCache<>(capacity,
-                new MissingValueFactory(factoryDelay));
-        return timeIt(
-                () -> ReadThroughCacheTestHelper.testMultiThreadedNGetsPerItem(cache, capacity, loops, threads, gets));
-    }
-
-    static long testSynchronized(int capacity, int threads, int loops, int gets, long factoryDelay) {
-        SynchronizedLRUCache<Integer, Integer> cache = new SynchronizedLRUCache<>(capacity,
-                new MissingValueFactory(factoryDelay));
-        return timeIt(
-                () -> ReadThroughCacheTestHelper.testMultiThreadedNGetsPerItem(cache, capacity, loops, threads, gets));
     }
 
     static long timeIt(Runnable function) {

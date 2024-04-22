@@ -4,31 +4,32 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 
-import java.util.ArrayList;
+import java.util.Iterator;
 
 /**
- * The code isn't going to win any beauty contests, it is just a proof of
- * concept to see if it is worth to use CAS operations instead of locking
- * to increase the read throughput in a read-through LRU cache.
+ * An implementation of a LRU cache that is efficient for small capacity,
+ * high number of concurrent threads and high latency of calculating values.
  * 
  * Evicting and adding new elements uses locks to avoid computing the same
  * value more than necessary if two concurrent calls attempt to fetch the
  * same missing key.
  * 
  * It uses sequential scans rather than a tree or a hashmap. The rationale
- * behind it is that for small collections simpler is usually faster.
+ * behind it is that for small collections simpler is usually faster, and
+ * each container cell being independent of each other allows for better
+ * parallelism.
  */
 public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
 
-    class TickEntry {
+    class TickEntry extends Entry<K, V> {
+        /**
+         * Represent when was the element last accessed.
+         */
         final long tick;
-        final K key;
-        final V value;
 
         public TickEntry(long tick, K key, V value) {
+            super(key, value);
             this.tick = tick;
-            this.key = key;
-            this.value = value;
         }
     }
 
@@ -79,7 +80,7 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
      * missing value factory and store it in the cache, potentially
      * evicting other key.
      */
-    public V get(K key) {
+    public V apply(K key) {
         for (int i = 0; i < this.capacity; i++) {
             TickEntry entry = findAndUpdateTimestamp(i, key);
             if (entry != null) {
@@ -150,8 +151,8 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
                 }
             }
 
-            if (this.entries.length() < this.capacity) {
-                placementIdx = this.entries.length();
+            if (i < this.capacity) {
+                placementIdx = i;
             } else {
                 placementIdx = leastRecentIdx;
             }
@@ -173,15 +174,19 @@ public class LockFreeLRUCache<K, V> implements ReadThroughCache<K, V> {
     }
 
     @Override
-    public Iterable<Entry<K, V>> entries() {
-        final ArrayList<Entry<K, V>> result = new ArrayList<>(this.entries.length());
-        for (int i = 0; i < this.capacity; i++) {
-            TickEntry t = this.entries.get(i);
-            if (t == null) {
-                break;
+    public Iterator<Entry<K, V>> iterator() {
+        return new Iterator<Entry<K,V>>() {
+            private int i = 0;
+
+            @Override
+            public boolean hasNext() {
+                return i < capacity && entries.get(i) != null;
             }
-            result.add(new Entry<>(t.key, t.value));
-        }
-        return result;
+
+            @Override
+            public Entry<K, V> next() {
+                return entries.get(i++);
+            }
+        };
     }
 }

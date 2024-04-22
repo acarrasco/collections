@@ -1,50 +1,12 @@
 package org.acarrasco.collections;
 
-import org.junit.Test;
-import static org.junit.Assert.*;
+import java.util.function.Function;
 
 
-public class LockFreeLRUCacheTest {
+public class LockFreeLRUCacheTest extends AbstractReadThroughCacheTest {
 
-    @Test public void testCapacity10_loops10() {
-        final int capacity = 10;
-        final int loops = 10;
-
-        ReadThroughCacheTestHelper.testSingleThreadOneGetPerItem(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysGetZero(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysLastElement(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
+    @Override
+    public ReadThroughCache<Integer, Integer> buildCache(Function<Integer, Integer> missingValueFactory, int capacity) {
+        return new LockFreeLRUCache<>(capacity, missingValueFactory);
     }
-
-    @Test public void testCapacity100_loops100() {
-        final int capacity = 100;
-        final int loops = 100;
-        ReadThroughCacheTestHelper.testSingleThreadOneGetPerItem(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysGetZero(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysLastElement(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-    }
-
-
-    @Test public void testCapacity100_loops10000() {
-        final int capacity = 100;
-        final int loops = 10000;
-        ReadThroughCacheTestHelper.testSingleThreadOneGetPerItem(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysGetZero(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-        ReadThroughCacheTestHelper.testSingleThreadAlwaysLastElement(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops);
-    }
-
-
-    @Test public void testConcurrent_Threads2_Capacity2_loops10000() throws InterruptedException {
-        final int threads = 2;
-        final int capacity = 2;
-        final int loops = 10000;
-        ReadThroughCacheTestHelper.testMultiThreadedNGetsPerItem(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops, threads, 1);
-    }
-
-    @Test public void testConcurrent_Threads10_Capacity20_loops10000() throws InterruptedException {
-        final int threads = 10;
-        final int capacity = 20;
-        final int loops = 10000;
-        ReadThroughCacheTestHelper.testMultiThreadedNGetsPerItem(new LockFreeLRUCache<>(capacity, (x) -> (x)), capacity, loops, threads, 1);
-    }
-
 }
