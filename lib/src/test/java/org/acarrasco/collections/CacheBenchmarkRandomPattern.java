@@ -16,8 +16,7 @@ public class CacheBenchmarkRandomPattern {
                     for (int keySpaceMult = 1; keySpaceMult <= 256; keySpaceMult *= 4) {
                         final int threads = 1 << threadsPow;
                         final int keySpace = capacity * keySpaceMult - 1;
-                        final double maxHitRate = Math.min(1.0, ((double) capacity / keySpace));
-                        final int getsPerThread = (int) (10000 / ((1 - maxHitRate) * delay * delay));
+                        final int getsPerThread = (int) (10000 / (delay * delay));
 
                         Function<Integer, Integer> missingValueFactory = new MissingValueFactory(delay, keySpace);
                         for (Map.Entry<String, ReadThroughCacheFactory> constructor : constructors.entrySet()) {

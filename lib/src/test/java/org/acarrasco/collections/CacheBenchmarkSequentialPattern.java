@@ -13,7 +13,7 @@ public class CacheBenchmarkSequentialPattern {
         for (int threadsPow = 1; threadsPow <= 4; threadsPow++) {
             for (int capacityPow = 6; capacityPow <= 14; capacityPow += 3) {
                 for (int delay = 1; delay <= 25; delay *= 5) {
-                    for (int getsPow = 0; getsPow <= 4; getsPow++) {
+                    for (int getsPow = 0; getsPow <= 4; getsPow+=2) {
                         final int capacity = 1 << capacityPow;
                         final int threads = 1 << threadsPow;
                         final int repeatedGets = 1 << getsPow;
@@ -28,7 +28,7 @@ public class CacheBenchmarkSequentialPattern {
                                     () -> AbstractReadThroughCacheTest.testMultiThreadedNGetsPerItem(cache, capacity,
                                             keySpaceMult, threads, repeatedGets));
                             System.out.println(
-                                    constructor.getKey() + "\t" + threads + "\t" + capacity + "\t" + delay + "\t"
+                                    constructor.getKey() + "\t" + threads + "\t" + capacity + "\t" + delay
                                             + "\t" + capacity * keySpaceMult + "\t" + repeatedGets + "\t" + time);
                         }
                     }
